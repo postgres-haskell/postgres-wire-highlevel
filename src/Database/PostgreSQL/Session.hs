@@ -14,12 +14,7 @@ import Data.ByteString (ByteString)
 import Data.Either
 import qualified Data.Vector as V
 
-import           PostgreSQL.Binary.Encoder (int8_int64, run)
-import qualified PostgreSQL.Binary.Decoder as D(int, run)
-
-import Database.PostgreSQL.Protocol.Types
-import Database.PostgreSQL.Connection
-import Database.PostgreSQL.Settings
+import Database.PostgreSQL.Other
 
 data Count = One | Many
     deriving (Eq, Show)
@@ -66,70 +61,51 @@ instance Monad Session where
 
     (>>) = (*>)
 
-class Encode a where
-    encode :: a -> ByteString
-    getOid :: a -> Oid
 
-class Decode a where
-    decode :: ByteString -> a
+-- query :: (Encode a, Decode b) => SessionQuery a b -> a -> Session b
+-- query sq val =
+--     let q = Query { qStatement = sqStatement sq
+--                   , qOids = [getOid val]
+--                   , qValues = [encode val]
+--                   , qParamsFormat = Binary
+--                   , qResultFormat = Binary }
+--     in Send One [q] $ Receive Done
 
-instance Encode Int64 where
-    encode   = run int8_int64
-    getOid _ = Oid 20
+-- runSession :: Show a => Connection -> Session a -> IO (Either Error a)
+-- runSession conn = go 0
+--   where
+--     go n (Done x) = do
+--         putStrLn $ "Return " ++ show x
+--         when (n > 0) $ void $ sendSync conn >> readReadyForQuery conn
+--         pure $ Right x
+--     go n (Receive f) = do
+--         putStrLn "Receiving"
+--         r <- readNextData conn
+--         case r of
+--             Left e -> pure $ Left e
+--             Right (DataMessage rows) -> go n (f $ decode $ V.head $ head rows)
+--     go n (Send _ qs c) = do
+--         putStrLn "Sending requests "
+--         sendBatch conn qs
+--         sendFlush conn
+--         go (n + 1) c
 
-instance Decode Int64 where
-    decode = fromRight . D.run D.int
-      where
-        fromRight (Right v) = v
-        fromRight _ = error "bad fromRight"
+-- q1 :: SessionQuery Int64 Int64
+-- q1 = SessionQuery "SELECT $1"
 
-data SessionQuery a b = SessionQuery { sqStatement :: ByteString }
-    deriving (Show)
+-- q2 :: SessionQuery Int64 Int64
+-- q2 = SessionQuery "SELECT count(*) from a where v < $1"
 
-query :: (Encode a, Decode b) => SessionQuery a b -> a -> Session b
-query sq val =
-    let q = Query { qStatement = sqStatement sq
-                  , qOids = [getOid val]
-                  , qValues = [encode val]
-                  , qParamsFormat = Binary
-                  , qResultFormat = Binary }
-    in Send One [q] $ Receive Done
+-- q3 :: SessionQuery Int64 Int64
+-- q3 = SessionQuery "SELECT 5 + $1"
 
-runSession :: Show a => Connection -> Session a -> IO (Either Error a)
-runSession conn = go 0
-  where
-    go n (Done x) = do
-        putStrLn $ "Return " ++ show x
-        when (n > 0) $ void $ sendSync conn >> readReadyForQuery conn
-        pure $ Right x
-    go n (Receive f) = do
-        putStrLn "Receiving"
-        r <- readNextData conn
-        case r of
-            Left e -> pure $ Left e
-            Right (DataMessage rows) -> go n (f $ decode $ V.head $ head rows)
-    go n (Send _ qs c) = do
-        putStrLn "Sending requests "
-        sendBatch conn qs
-        sendFlush conn
-        go (n + 1) c
-
-q1 :: SessionQuery Int64 Int64
-q1 = SessionQuery "SELECT $1"
-
-q2 :: SessionQuery Int64 Int64
-q2 = SessionQuery "SELECT count(*) from a where v < $1"
-
-q3 :: SessionQuery Int64 Int64
-q3 = SessionQuery "SELECT 5 + $1"
-
-testSession :: IO ()
-testSession  = do
-    c <- connect defaultConnectionSettings
-    r <- runSession c $ do
-        b <- query q1 10
-        a <- query q2 b
-        query q3 a
-    print r
-    close c
+-- testSession :: IO ()
+-- testSession  = do
+--     c <- connect defaultConnectionSettings
+--     r <- runSession c $ do
+--         b <- query q1 10
+--         a <- query q2 b
+--         query q3 a
+--     print r
+--     close c
 

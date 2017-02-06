@@ -13,10 +13,14 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Database.PostgreSQL.Session
+  exposed-modules:     
+                      -- Database.PostgreSQL.Session
+                      Database.PostgreSQL.Query
+                     , Database.PostgreSQL.Other
   build-depends:       base >= 4.7 && < 5
                      , bytestring
                      , vector
+                     , unordered-containers
   default-language:    Haskell2010
   default-extensions:  
     BangPatterns

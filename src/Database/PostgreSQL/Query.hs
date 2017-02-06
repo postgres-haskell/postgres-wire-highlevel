@@ -10,22 +10,11 @@ import qualified Data.HashSet as HS
 import Data.Word
 import Data.Proxy
 import Data.Monoid
+import Data.Coerce
 
 -- import Database.PostgreSQL.Session
 import Database.PostgreSQL.Other
 
----------------
--- Result Parser
----------------
-
-data ResultParser
-    = OneResurtParser
-    | MaybeResultParser
-    | ManyParser
-
-data ResultParserError
-    = ResultNoRows
-    | ResultToManyRows
 
 ---------------------
 -- Row parser
@@ -74,64 +63,90 @@ composite name xs = undefined
 class ToPostgres a where
     toPostgres :: Encoder a
 
--- Params
-
 class IsParams a where
     params :: a -> [QueryM EncodeResult]
 
 instance (ToPostgres a, ToPostgres b) => IsParams (a, b) where
     params (a, b) = [toPostgres a, toPostgres b]
 
+----------------------
+-- Results
+-------------------
+
+data ResultParser a
+    = OneRowParser
+    | MaybeRowParser
+    | ManyRowsParser
+
+data ResultParserError
+    = ResultNoRows
+    | ResultToManyRows
+
+data SingleRow a
+data MaybeRow a
+data ManyRows a
+
+class FromResult a where
+    type Result a :: *
+
+    resultParser :: ResultParser (Result a)
+
+instance FromPostgres a => FromResult (SingleRow a) where
+    type Result (SingleRow a) = a
+
+    resultParser = OneRowParser
+
+instance FromPostgres a => FromResult (MaybeRow a) where
+    type Result (MaybeRow a) = Maybe a
+
+    resultParser = MaybeRowParser
+
+instance FromPostgres a => FromResult (ManyRows a) where
+    type Result (ManyRows a) = V.Vector a
+
+    resultParser = ManyRowsParser
+
+------------------------
+-- Session
+-----------------------
+
+data SessionQuery a b = SessionQuery { sqStatement :: B.ByteString }
+    deriving (Show)
+
 type Context = [QueryM EncodeResult]
 
-class ToParams a where
-    type ParamType a :: *
+class ToSession a where
+    type SessionType a :: *
 
-    derive :: Proxy a -> Context -> ParamType a
+    derive :: a -> Context -> SessionType a
 
-instance IsParams a => ToParams a where
-    type ParamType a = a -> [QueryM EncodeResult]
+instance (IsParams a, FromResult b) => ToSession (SessionQuery a b) where
+    type SessionType a = a -> Session (Result b)
 
-    derive p ctx = ctx <> params
+    derive q ctx = buildSession s $ ctx <> params
 
-instance (ToPostgres x, ToParams xs) => ToParams (x ': xs) where
-    type ParamType (x ': xs) = x -> ParamType xs
+instance (ToPostgres x, ToSession xs, FromResult b)
+      => ToSession (SessionQuery (x ': xs) b) where
 
-    derive p ctx v = derive (Proxy :: Proxy xs) (toPostgres v : ctx)
+    type SessionType (x ': xs) = x -> SessionType xs
 
-instance ToParams '[] where
-    type ParamType a = [QueryM EncodeResult]
+    derive q ctx v = derive (coerce q :: SessionQuery xs b) (toPostgres v : ctx)
 
-    derive p ctx = ctx
+instance FromResult b => ToSession (SessionQuery '[] b) where
+    type SessionType a = Session (Result b)
 
-getParams :: ToParams a => SessionQuery a b -> ParamType a
-getParams _ = derive (Proxy :: Proxy a) []
+    derive = buildSession
 
+query :: ToSession q => q -> SessionType q
+query q = derive q []
 
-buildSession :: SessionQuery a b -> [QueryM EncoderResult] -> Session b
+buildSession
+    :: FromResult b
+    => SessionQuery a b -> [QueryM EncoderResult] -> Session (Result b)
 buildSession = undefined
  -- makeQuery . runEncodeResult <$> sequence params
  --   where
  --     makeQuery values = Query
-
-----------------------
--- Results
--------------------
-data ResultType a
-    = SingleRow a
-    | MaybeRow a
-    | ManyRows a
-
-data SessionQuery a (b :: ResultType *) = SessionQuery { sqStatement :: B.ByteString }
-    deriving (Show)
-
-type family Result a where
-    Result (SingleRow a) = a
-    Result (MaybeRow a) = Maybe a
-    Result (ManyRows a) = V.Vector a
-
-query :: (ToParams a, FromRows b) => SessionQuery a b -> a -> Session (Result b)
-query = undefined
 
 
 tq :: SessionQuery '[Int, Char, Word] b

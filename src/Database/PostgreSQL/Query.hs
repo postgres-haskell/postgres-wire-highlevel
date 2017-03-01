@@ -20,7 +20,10 @@ import Database.PostgreSQL.Other
 -- Row parser
 ---------------------
 data RowParserError = RowParserError
-data RowParser s a = RowParser (s -> Either RowParserError (s, a))
+data RowParser s a
+    = PrimParser (B.ByteString -> Either RowParserError (B.ByteString, a))
+    | ArrayParser (B.ByteString -> Either RowParserError (B.ByteString, a))
+    | RowParser (s -> Either RowParserError (s, a))
 
 --------------------
 -- Encoders
